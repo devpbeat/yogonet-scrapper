@@ -33,15 +33,17 @@ docker build -t yogonet-scrapper .
 ```bash
 docker run yogonet-scrapper
 ```
-
-4. To store data in BigQuery, you'll need to set some environment variables:
+4. To configure the scrapper, copy the `.env.example` to `.env` and set your environment variables:
 ```bash
-docker run \
-  -e DATASET=your_dataset \
-  -e PROJECT_ID=your_project_id \
-  -e GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json \
-  -v /path/to/your/credentials.json:/app/credentials.json \
-  yogonet-scrapper
+cp .env.example .env
+```
+  
+5. Run the scrapper with the environment variables:
+```bash
+docker run --env-file .env yogonet-scrapper
+```
+```bash
+docker run --env-file .env yogonet-scrapper
 ```
 
 5. (Optional) To use the AI-based selector feature, set your OpenAI API key:
