@@ -14,6 +14,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 import chromedriver_binary
+from .ai_selector import AiSelector
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ class YogonetScraper:
         self.base_url = "https://www.yogonet.com/international/"
         self.driver = None
         self.headless = headless
+        self.ai_selector = AiSelector()
         
     def _setup_driver(self) -> webdriver.Chrome:
         """
@@ -79,22 +81,35 @@ class YogonetScraper:
             # Parse with BeautifulSoup
             soup = BeautifulSoup(response.content, 'html.parser')
             
-            # Find article containers 
-            article_containers = soup.select('.contenedor_dato_modulo')
+            # Use AI Selector to get dynamic selectors
+            try:
+                selectors = self.ai_selector.get_selectors(response.text)
+            except Exception as selector_error:
+                logger.warning(f"AI Selector failed, using fallback selectors: {selector_error}")
+                selectors = {
+                    'article_container': '.contenedor_dato_modulo',
+                    'title': '.titulo',
+                    'kicker': '.volanta',
+                    'link': 'a',
+                    'image': 'img'
+                }
+            
+            # Find article containers using dynamic selectors
+            article_containers = soup.select(selectors.get('article_container', '.contenedor_dato_modulo'))
             
             articles = []
             for container in article_containers[:limit]:
                 try:
-                    # Extract article details
-                    title_elem = container.find('h2', class_='titulo')
-                    volanta_elem = container.find('div', class_='volanta')
-                    image_elem = container.find('img')
-                    link_elem = container.find('a')
+                    # Extract article details using dynamic selectors
+                    title_elem = container.select_one(selectors.get('title', '.titulo'))
+                    kicker_elem = container.select_one(selectors.get('kicker', '.volanta'))
+                    link_elem = container.select_one(selectors.get('link', 'a'))
+                    image_elem = container.select_one(selectors.get('image', 'img'))
                     
                     if title_elem and link_elem:
                         article = {
                             'title': title_elem.text.strip(),
-                            'kicker': volanta_elem.text.strip() if volanta_elem else 'No kicker',
+                            'kicker': kicker_elem.text.strip() if kicker_elem else 'No kicker',
                             'link': link_elem.get('href', ''),
                             'image': image_elem.get('src', '') if image_elem else '',
                             'date': container.find('div', class_='fecha_actual').text.strip() if container.find('div', class_='fecha_actual') else 'No date'

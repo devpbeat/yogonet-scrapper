@@ -7,7 +7,7 @@ import os
 import re
 import json
 from bs4 import BeautifulSoup
-import openai
+from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -17,15 +17,20 @@ class AiSelector:
     def __init__(self):
         """Initialize the AI selector."""
         # Try to load API key from environment
-        api_key = os.getenv("OPENAI_API_KEY")
-        if api_key:
-            openai.api_key = api_key
+        try:
+            self.client = OpenAI(
+                api_key=os.getenv("OPENAI_API_KEY")
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize OpenAI client: {e}")
+            self.client = None
+
         self.default_selectors = {
-            'article_container': '.slot.noticia',
-            'title': '.titulo a',
+            'article_container': '.contenedor_dato_modulo',
+            'title': '.titulo',
             'kicker': '.volanta',
-            'link': '.titulo a',
-            'image': '.imagen a img'
+            'link': 'a',
+            'image': 'img'
         }
     
     def get_selectors(self, html):
@@ -35,8 +40,9 @@ class AiSelector:
         If OpenAI API key is not available, returns default selectors.
         Otherwise, uses AI to predict selectors.
         """
-        if not openai.api_key:
-            logger.warning("OpenAI API key not found. Using default selectors.")
+        # Check if client is initialized
+        if not self.client:
+            logger.warning("OpenAI client not initialized. Using default selectors.")
             return self.default_selectors
         
         try:
@@ -44,43 +50,49 @@ class AiSelector:
             soup = BeautifulSoup(html, 'html.parser')
             
             # Find a sample article to send to the AI
-            sample_article = soup.select_one('.slot.noticia')
+            sample_article = soup.select_one('.contenedor_dato_modulo')
             
             if not sample_article:
                 logger.warning("No sample article found. Using default selectors.")
                 return self.default_selectors
             
             # Send a request to the OpenAI API
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
+            response = self.client.chat.completions.create(
+                model="o3-mini",
                 messages=[
-                    {"role": "system", "content": "You are a web scraping assistant. Your task is to analyze HTML and identify CSS selectors for news articles."},
-                    {"role": "user", "content": f"""
-                    Based on this HTML sample of a news article from Yogonet International, please identify the CSS selectors for:
-                    1. The container element for each article
-                    2. The title element
-                    3. The kicker/subtitle element
-                    4. The link element to the full article
-                    5. The image element
-                    
-                    Respond with a valid JSON object with these keys: article_container, title, kicker, link, image
-                    
-                    Here is the HTML sample:
-                    {sample_article}
-                    """}
-                ]
+                    {
+                        "role": "system", 
+                        "content": "You are a web scraping assistant. Your task is to analyze HTML and identify CSS selectors for news articles."
+                    },
+                    {
+                        "role": "user", 
+                        "content": f"""
+                        Based on this HTML sample of a news article from Yogonet International, please identify the CSS selectors for:
+                        1. The container element for each article
+                        2. The title element
+                        3. The kicker/subtitle element
+                        4. The link element to the full article
+                        5. The image element
+                        
+                        Respond with a valid JSON object with these keys: article_container, title, kicker, link, image
+                        
+                        Here is the HTML sample:
+                        {sample_article}
+                        """
+                    }
+                ],
+                response_format={"type": "json_object"}
             )
             
             # Extract the response
             ai_response = response.choices[0].message.content
             
-            # Extract the JSON part
-            json_match = re.search(r'{.*}', ai_response, re.DOTALL)
-            if json_match:
-                selectors = json.loads(json_match.group(0))
+            # Parse the JSON response
+            try:
+                selectors = json.loads(ai_response)
                 logger.info("Successfully generated selectors using AI")
                 return selectors
-            else:
+            except json.JSONDecodeError:
                 logger.warning("Could not parse AI response. Using default selectors.")
                 return self.default_selectors
                 
