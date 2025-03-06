@@ -74,9 +74,9 @@ class AiSelector:
 
                         Example format:
                         {{
-                            "article_container": ".contenedor_dato_modulo",
-                            "title": ".titulo",
-                            "kicker": ".volanta",
+                            "article_container": ".some_selector",
+                            "title": ".title",
+                            "kicker": ".whatever",
                             "link": "a",
                             "image": "img"
                         }}
@@ -105,6 +105,7 @@ class AiSelector:
                         return self.default_selectors
                 
                 logger.info("Successfully generated selectors using AI")
+                logger.info("Selectors: " + json.dumps(selectors, indent=2))
                 return selectors
             
             except (json.JSONDecodeError, TypeError) as parse_error:
