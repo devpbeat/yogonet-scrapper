@@ -43,6 +43,8 @@ class BigQueryWriter:
             # Post-processing metrics
             df['title_word_count'] = df['title'].apply(self._count_words)
             df['title_char_count'] = df['title'].apply(len)
+            
+            # Capitalized words processing
             df['capitalized_words'] = df['title'].apply(self._find_capitalized_words)
             
             # Define schema for BigQuery
@@ -51,6 +53,7 @@ class BigQueryWriter:
                 {'name': 'kicker', 'type': 'STRING'},
                 {'name': 'link', 'type': 'STRING'},
                 {'name': 'image', 'type': 'STRING'},
+                {'name': 'date', 'type': 'STRING'},
                 {'name': 'scrape_timestamp', 'type': 'TIMESTAMP'},
                 {'name': 'title_word_count', 'type': 'INTEGER'},
                 {'name': 'title_char_count', 'type': 'INTEGER'},
@@ -64,7 +67,7 @@ class BigQueryWriter:
             
             # Prepare capitalized words as comma-separated string for BigQuery
             df['capitalized_words'] = df['capitalized_words'].apply(
-                lambda x: ','.join(x) if isinstance(x, list) else x
+                lambda x: ','.join(x) if isinstance(x, list) else str(x)
             )
             
             # Write to BigQuery
@@ -78,7 +81,7 @@ class BigQueryWriter:
             
             logger.info(f"Successfully wrote {len(df)} articles to {full_table_name}")
             
-            # Optional: Generate and log summary
+            # Optional: Log summary
             self._log_article_summary(df)
             
             return df
@@ -128,9 +131,12 @@ class BigQueryWriter:
             logger.info(f"Average Title Character Count: {df['title_char_count'].mean():.2f}")
             
             # Find most common capitalized words
-            all_capitalized_words = [word for words in df['capitalized_words'] for word in words.split(',') if word]
+            all_capitalized_words = [
+                word for words in df['capitalized_words'] 
+                for word in str(words).split(',') if word.strip()
+            ]
             from collections import Counter
-            top_capitalized = Counter(all_capitalized_words).most_common(5)
+            top_capitalized = Counter(all_capitalized_words).most_common(10)
             
             logger.info("Top Capitalized Words:")
             for word, count in top_capitalized:
