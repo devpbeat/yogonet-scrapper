@@ -5,8 +5,8 @@ Main entry point for the Yogonet scraper application.
 import os
 import time
 import logging
-from scraper import YogonetScraper
-from bigquery_writer import BigQueryWriter
+from modules.scrapper import YogonetScraper
+from modules.bigquery_writer import BigQueryWriter
 
 # Set up logging
 logging.basicConfig(

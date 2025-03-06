@@ -17,12 +17,13 @@ if [ -z "$PROJECT_ID" ]; then
 fi
 
 REGION="${REGION:-us-central1}"  # Default to us-central1 if not specified in .env
+ARTIFACT_REPO="${ARTIFACT_REPO:-yogonet-images}"  # Default repo name
 IMAGE_NAME="yogonet-scraper"
 SERVICE_NAME="yogonet-scraper-service"
-SERVICE_ACCOUNT="${SERVICE_ACCOUNT:-yogonet-scraper-sa@$PROJECT_ID.iam.gserviceaccount.com}"
+SERVICE_ACCOUNT="${SERVICE_ACCOUNT:-yogonet-service-acc@$PROJECT_ID.iam.gserviceaccount.com}"
 
-# Set the full image path
-IMAGE_PATH="gcr.io/$PROJECT_ID/$IMAGE_NAME"
+# Set the full image path for Artifact Registry
+IMAGE_PATH="$REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REPO/$IMAGE_NAME:latest"
 
 # Check if gcloud is installed
 if ! command -v gcloud &> /dev/null; then
@@ -34,12 +35,25 @@ fi
 echo "Setting project to $PROJECT_ID..."
 gcloud config set project $PROJECT_ID
 
+# Configure Docker to use gcloud credentials for Artifact Registry
+echo "Configuring Docker authentication to Artifact Registry..."
+gcloud auth configure-docker $REGION-docker.pkg.dev --quiet
+
+# Check if repository exists, create if it doesn't
+if ! gcloud artifacts repositories describe $ARTIFACT_REPO --location=$REGION &> /dev/null; then
+    echo "Creating Artifact Registry repository $ARTIFACT_REPO..."
+    gcloud artifacts repositories create $ARTIFACT_REPO \
+        --repository-format=docker \
+        --location=$REGION \
+        --description="Docker repository for Yogonet scraper"
+fi
+
 # Build the Docker image
 echo "Building Docker image..."
 docker build -t $IMAGE_PATH .
 
-# Push the image to Google Container Registry
-echo "Pushing image to Google Container Registry..."
+# Push the image to Artifact Registry
+echo "Pushing image to Artifact Registry..."
 docker push $IMAGE_PATH
 
 # Create temporary .env.yaml file for Cloud Run
