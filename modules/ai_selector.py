@@ -4,14 +4,9 @@ AI-based selector for finding the correct DOM elements.
 """
 import logging
 import os
-import re
 import json
 from bs4 import BeautifulSoup
-
-try:
-    from openai import OpenAI
-except ImportError:
-    OpenAI = None
+from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +15,15 @@ class AiSelector:
     
     def __init__(self):
         """Initialize the AI selector."""
-        # Default selectors in case AI fails
+        # Hardcoded API key for testing
+        
+        # Alternative methods to get API key (uncomment if needed)
+        self.api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        
+        # Initialize OpenAI client
+        self.client = OpenAI(api_key=self.api_key)
+        
+        # Default selectors
         self.default_selectors = {
             'article_container': '.contenedor_dato_modulo',
             'title': '.titulo',
@@ -28,77 +31,47 @@ class AiSelector:
             'link': 'a',
             'image': 'img'
         }
-        
-        # Try to initialize OpenAI client
-        self.client = None
-        self._initialize_openai_client()
-    
-    def _initialize_openai_client(self):
-        """
-        Initialize OpenAI client with robust error handling.
-        """
-        if not OpenAI:
-            logger.warning("OpenAI library not installed. AI selectors disabled.")
-            return
-        
-        # Get API key
-        api_key = os.getenv("OPENAI_API_KEY", "").strip()
-        
-        if not api_key:
-            logger.warning("No OpenAI API key found. AI selectors disabled.")
-            return
-        
-        try:
-            self.client = OpenAI(api_key=api_key)
-            
-            # Verify the key works with a simple test
-            self.client.models.list(limit=1)
-        except Exception as e:
-            logger.error(f"Failed to initialize OpenAI client: {e}")
-            self.client = None
     
     def get_selectors(self, html):
         """
         Get the selectors for the articles on the page.
         
-        Fallback to default selectors if AI fails.
+        :param html: HTML content to analyze
+        :return: Dictionary of CSS selectors
         """
-        # If no client, return default selectors
-        if not self.client:
-            logger.warning("OpenAI client not available. Using default selectors.")
-            return self.default_selectors
-        
         try:
-            # Extract a sample of the HTML to analyze
+            # Parse HTML
             soup = BeautifulSoup(html, 'html.parser')
             
-            # Find a sample article to send to the AI
+            # Find a sample article
             sample_article = soup.select_one('.contenedor_dato_modulo')
             
             if not sample_article:
                 logger.warning("No sample article found. Using default selectors.")
                 return self.default_selectors
             
-            # Send a request to the OpenAI API
+            # Create AI request without JSON schema (simpler approach)
             response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4o",
                 messages=[
                     {
                         "role": "system", 
-                        "content": "You are a web scraping assistant. Your task is to analyze HTML and identify CSS selectors for news articles."
+                        "content": "You are a web scraping expert specializing in identifying precise CSS selectors for news article elements."
                     },
                     {
                         "role": "user", 
                         "content": f"""
-                        Based on this HTML sample of a news article from Yogonet International, please identify the CSS selectors for:
-                        1. The container element for each article
-                        2. The title element
-                        3. The kicker/subtitle element
-                        4. The link element to the full article
-                        5. The image element
-                        
-                        Respond ONLY with a valid JSON object with these keys: article_container, title, kicker, link, image
-                        
+                        Analyze this HTML snippet from a Yogonet International news page and extract the most precise CSS selectors:
+
+                        {sample_article}
+
+                        Respond with a JSON object containing these EXACT keys:
+                        - article_container
+                        - title
+                        - kicker
+                        - link
+                        - image
+
                         Example format:
                         {{
                             "article_container": ".contenedor_dato_modulo",
@@ -107,34 +80,37 @@ class AiSelector:
                             "link": "a",
                             "image": "img"
                         }}
-                        
-                        Here is the HTML sample:
-                        {sample_article}
+
+                        Focus on:
+                        - Minimal, precise selectors
+                        - Selectors that work across multiple articles
+                        - Prioritizing class and ID selectors
                         """
                     }
                 ],
                 response_format={"type": "json_object"},
-                max_tokens=300
+                max_tokens=300,
+                temperature=0.7
             )
             
-            # Extract the response
-            ai_response = response.choices[0].message.content
-            
-            # Parse the JSON response
+            # Extract and parse the response
             try:
-                selectors = json.loads(ai_response)
+                # Parse the JSON response
+                selectors = json.loads(response.choices[0].message.content)
                 
-                # Validate the selectors
+                # Validate selectors
                 for key in ['article_container', 'title', 'kicker', 'link', 'image']:
-                    if key not in selectors or not isinstance(selectors[key], str):
-                        raise ValueError(f"Missing or invalid selector for {key}")
+                    if not selectors.get(key):
+                        logger.warning(f"Missing selector for {key}")
+                        return self.default_selectors
                 
                 logger.info("Successfully generated selectors using AI")
                 return selectors
-            except (json.JSONDecodeError, ValueError) as parse_error:
-                logger.warning(f"Could not parse AI response: {parse_error}. Using default selectors.")
+            
+            except (json.JSONDecodeError, TypeError) as parse_error:
+                logger.error(f"Failed to parse AI response: {parse_error}")
                 return self.default_selectors
-                
+        
         except Exception as e:
-            logger.error(f"Error using AI to get selectors: {e}")
+            logger.error(f"Unexpected error in AI selector: {e}")
             return self.default_selectors
