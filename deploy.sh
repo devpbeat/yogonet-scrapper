@@ -1,5 +1,8 @@
 #!/bin/bash
-# Script to build, push, and deploy the Yogonet scraper to Cloud Run
+# Comprehensive deployment script for Yogonet Scraper to Google Cloud Run
+
+# Fail on any error
+set -e
 
 # Source environment variables from .env file
 if [ -f .env ]; then
@@ -10,53 +13,69 @@ else
   exit 1
 fi
 
-# Configuration
-if [ -z "$PROJECT_ID" ]; then
-  echo "Error: PROJECT_ID not set in .env file"
-  exit 1
-fi
-
-REGION="${REGION:-us-central1}"  # Default to us-central1 if not specified in .env
-ARTIFACT_REPO="${ARTIFACT_REPO:-yogonet-images}"  # Default repo name
-IMAGE_NAME="yogonet-scraper"
-SERVICE_NAME="yogonet-scraper-service"
-SERVICE_ACCOUNT="${SERVICE_ACCOUNT:-yogonet-service-acc@$PROJECT_ID.iam.gserviceaccount.com}"
-
-# Set the full image path for Artifact Registry
-IMAGE_PATH="$REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REPO/$IMAGE_NAME:latest"
-
-# Check if gcloud is installed
-if ! command -v gcloud &> /dev/null; then
-    echo "gcloud CLI is not installed. Please install it first."
+# Validate required environment variables
+REQUIRED_VARS=("PROJECT_ID" "REGION")
+for var in "${REQUIRED_VARS[@]}"; do
+  if [ -z "${!var}" ]; then
+    echo "Error: $var is not set in .env file"
     exit 1
-fi
+  fi
+done
 
-# Ensure we're using the correct project
-echo "Setting project to $PROJECT_ID..."
-gcloud config set project $PROJECT_ID
+# Set default values if not provided
+REGION="${REGION:-us-central1}"
+SERVICE_NAME="${SERVICE_NAME:-yogonet-scraper-service}"
+IMAGE_NAME="${IMAGE_NAME:-yogonet-scraper}"
 
-# Configure Docker to use gcloud credentials for Artifact Registry
-echo "Configuring Docker authentication to Artifact Registry..."
-gcloud auth configure-docker $REGION-docker.pkg.dev --quiet
+# Full image path for Artifact Registry
+FULL_IMAGE_PATH="${REGION}-docker.pkg.dev/${PROJECT_ID}/${IMAGE_NAME}/${IMAGE_NAME}:latest"
 
-# Check if repository exists, create if it doesn't
-if ! gcloud artifacts repositories describe $ARTIFACT_REPO --location=$REGION &> /dev/null; then
-    echo "Creating Artifact Registry repository $ARTIFACT_REPO..."
-    gcloud artifacts repositories create $ARTIFACT_REPO \
+# Check prerequisites
+command -v gcloud >/dev/null 2>&1 || { 
+    echo "gcloud CLI is not installed. Please install Google Cloud SDK."
+    exit 1 
+}
+
+command -v docker >/dev/null 2>&1 || { 
+    echo "Docker is not installed. Please install Docker."
+    exit 1 
+}
+
+# Set the Google Cloud project
+echo "Setting Google Cloud project to ${PROJECT_ID}..."
+gcloud config set project ${PROJECT_ID}
+
+# Enable required APIs
+echo "Enabling required Google Cloud APIs..."
+gcloud services enable \
+    artifactregistry.googleapis.com \
+    run.googleapis.com \
+    containerregistry.googleapis.com \
+    cloudbuild.googleapis.com
+
+# Create Artifact Registry repository if it doesn't exist
+echo "Checking/Creating Artifact Registry repository..."
+if ! gcloud artifacts repositories describe "${IMAGE_NAME}" \
+    --location="${REGION}" 2>/dev/null; then
+    gcloud artifacts repositories create "${IMAGE_NAME}" \
         --repository-format=docker \
-        --location=$REGION \
-        --description="Docker repository for Yogonet scraper"
+        --location="${REGION}" \
+        --description="Repository for Yogonet Scraper"
 fi
+
+# Configure Docker to use Artifact Registry
+echo "Configuring Docker to use Artifact Registry..."
+gcloud auth configure-docker "${REGION}-docker.pkg.dev"
 
 # Build the Docker image
 echo "Building Docker image..."
-docker build -t $IMAGE_PATH .
+docker buildx build -t "${FULL_IMAGE_PATH}" .
 
 # Push the image to Artifact Registry
 echo "Pushing image to Artifact Registry..."
-docker push $IMAGE_PATH
+docker push "${FULL_IMAGE_PATH}"
 
-# Create temporary .env.yaml file for Cloud Run
+# Prepare environment variables file for Cloud Run
 echo "Creating deployment environment file..."
 cat > .env.yaml << EOF
 DATASET: "${DATASET}"
@@ -68,19 +87,20 @@ EOF
 
 # Deploy to Cloud Run
 echo "Deploying to Cloud Run..."
-gcloud run deploy $SERVICE_NAME \
-  --image $IMAGE_PATH \
-  --platform managed \
-  --region $REGION \
-  --allow-unauthenticated \
-  --memory 2Gi \
-  --timeout 30m \
-  --set-env-vars-file=.env.yaml \
-  --service-account="$SERVICE_ACCOUNT"
+gcloud run deploy "${SERVICE_NAME}" \
+    --image "${FULL_IMAGE_PATH}" \
+    --platform managed \
+    --region "${REGION}" \
+    --allow-unauthenticated \
+    --memory 2Gi \
+    --timeout 30m \
+    --set-env-vars-file=.env.yaml \
+    --service-account="${SERVICE_ACCOUNT}"
 
 # Clean up temporary file
 echo "Cleaning up temporary files..."
 rm .env.yaml
 
+# Display service URL
 echo "Deployment completed! Service URL:"
-gcloud run services describe $SERVICE_NAME --region $REGION --format="value(status.url)"
+gcloud run services describe "${SERVICE_NAME}" --region "${REGION}" --format="value(status.url)"
