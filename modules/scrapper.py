@@ -3,7 +3,7 @@
 Yogonet International Web Scraper Module
 Extracts latest news articles from the website.
 """
-
+import os
 import logging
 from typing import List, Dict, Optional
 
@@ -46,9 +46,9 @@ class YogonetScraper:
         
         # Headless configuration
         if self.headless:
-            chrome_options.add_argument("--headless")
+            chrome_options.add_argument("--headless=new")
         
-        # Performance and compatibility options
+        # Performance and compatibility options for containerized environments
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-gpu")
@@ -56,12 +56,40 @@ class YogonetScraper:
         chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("--disable-software-rasterizer")
         chrome_options.add_argument("--remote-debugging-port=9222")
+        chrome_options.add_argument("--disable-site-isolation-trials")
+        
+        # Set binary location from environment if available
+        chrome_binary = os.environ.get("CHROME_BIN")
+        if chrome_binary:
+            chrome_options.binary_location = chrome_binary
+            logger.info(f"Using Chrome binary at: {chrome_binary}")
         
         try:
-            # Use WebDriverManager to handle driver installation
-            service = Service(ChromeDriverManager().install())
-            driver = webdriver.Chrome(service=service, options=chrome_options)
-            return driver
+            # First try with WebDriverManager
+            try:
+                service = Service(ChromeDriverManager().install())
+                driver = webdriver.Chrome(service=service, options=chrome_options)
+                logger.info("Successfully initialized Chrome using WebDriverManager")
+                return driver
+            except Exception as wdm_error:
+                logger.warning(f"WebDriverManager approach failed: {wdm_error}")
+                
+                # Fall back to chromedriver_binary
+                try:
+                    driver = webdriver.Chrome(options=chrome_options)
+                    logger.info("Successfully initialized Chrome using chromedriver_binary")
+                    return driver
+                except Exception as binary_error:
+                    logger.warning(f"chromedriver_binary approach failed: {binary_error}")
+                    
+                    # Last resort: Try with direct path
+                    try:
+                        driver = webdriver.Chrome(options=chrome_options)
+                        logger.info("Successfully initialized Chrome using direct path")
+                        return driver
+                    except Exception as direct_error:
+                        logger.error(f"Direct path approach failed: {direct_error}")
+                        raise
         except Exception as e:
             logger.error(f"Failed to initialize WebDriver: {e}")
             raise

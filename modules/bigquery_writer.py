@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-Module for writing scraped data to BigQuery with enhanced entity extraction.
+Module for writing scraped data to BigQuery using direct BigQuery client.
 """
 import os
 import logging
 import pandas as pd
-import pandas_gbq
 from datetime import datetime
 from typing import List, Dict, Optional
+from google.cloud import bigquery
 
 class BigQueryWriter:
-    """Class for writing data to BigQuery with named entity support."""
+    """Class for writing data to BigQuery using the BigQuery client library."""
     
     def __init__(self):
         """Initialize the BigQuery writer."""
@@ -19,6 +19,14 @@ class BigQueryWriter:
         
         if not self.project_id:
             logging.warning("PROJECT_ID environment variable not set. Using default project.")
+        
+        try:
+            # Initialize BigQuery client
+            self.client = bigquery.Client()
+            logging.info(f"BigQuery client initialized for project: {self.project_id}")
+        except Exception as e:
+            logging.error(f"Failed to initialize BigQuery client: {e}")
+            self.client = None
     
     def write_articles(self, 
                        articles: List[Dict], 
@@ -32,6 +40,10 @@ class BigQueryWriter:
         """
         if not articles:
             logging.warning("No articles to write to BigQuery.")
+            return None
+        
+        if not self.client:
+            logging.error("BigQuery client not initialized. Cannot write to BigQuery.")
             return None
         
         try:
@@ -60,40 +72,49 @@ class BigQueryWriter:
             
             # Define schema for BigQuery
             schema = [
-                {'name': 'title', 'type': 'STRING'},
-                {'name': 'kicker', 'type': 'STRING'},
-                {'name': 'link', 'type': 'STRING'},
-                {'name': 'image', 'type': 'STRING'},
-                {'name': 'date', 'type': 'STRING'},
-                {'name': 'scrape_timestamp', 'type': 'TIMESTAMP'},
-                {'name': 'title_word_count', 'type': 'INTEGER'},
-                {'name': 'title_char_count', 'type': 'INTEGER'},
-                {'name': 'capitalized_words', 'type': 'STRING'},
-                {'name': 'persons', 'type': 'STRING'},
-                {'name': 'organizations', 'type': 'STRING'},
-                {'name': 'locations', 'type': 'STRING'}
+                bigquery.SchemaField("title", "STRING"),
+                bigquery.SchemaField("kicker", "STRING"),
+                bigquery.SchemaField("link", "STRING"),
+                bigquery.SchemaField("image", "STRING"),
+                bigquery.SchemaField("date", "STRING"),
+                bigquery.SchemaField("scrape_timestamp", "TIMESTAMP"),
+                bigquery.SchemaField("title_word_count", "INTEGER"),
+                bigquery.SchemaField("title_char_count", "INTEGER"),
+                bigquery.SchemaField("capitalized_words", "STRING"),
+                bigquery.SchemaField("persons", "STRING"),
+                bigquery.SchemaField("organizations", "STRING"),
+                bigquery.SchemaField("locations", "STRING")
             ]
             
             # Full table name
-            full_table_name = f'{self.dataset}.{table_name}'
+            full_table_id = f"{self.project_id}.{self.dataset}.{table_name}"
             
-            logging.info(f"Writing {len(df)} articles to BigQuery table {full_table_name}")
+            logging.info(f"Writing {len(df)} articles to BigQuery table {full_table_id}")
             
-            # Write to BigQuery
-            pandas_gbq.to_gbq(
-                df,
-                full_table_name,
-                project_id=self.project_id,
-                table_schema=schema,
-                if_exists='append'
+            # Configure job
+            job_config = bigquery.LoadJobConfig(
+                schema=schema,
+                write_disposition=bigquery.WriteDisposition.WRITE_APPEND
             )
             
-            logging.info(f"Successfully wrote {len(df)} articles to {full_table_name}")
-            
-            # Log summary
-            self._log_article_summary(df)
-            
-            return df
+            # Write to BigQuery using direct client load
+            try:
+                job = self.client.load_table_from_dataframe(
+                    df, full_table_id, job_config=job_config
+                )
+                
+                # Wait for the job to complete
+                job.result()
+                
+                logging.info(f"Successfully wrote {len(df)} articles to {full_table_id}")
+                
+                # Log summary
+                self._log_article_summary(df)
+                
+                return df
+            except Exception as job_error:
+                logging.error(f"BigQuery load job failed: {job_error}")
+                return None
         
         except Exception as e:
             logging.error(f"Error writing to BigQuery: {e}")

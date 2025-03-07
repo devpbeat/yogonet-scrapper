@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """
 Main entry point for the Yogonet International Web Scraper.
-
-Orchestrates web scraping, post-processing, named entity extraction,
-and BigQuery integration.
 """
 
 import os
@@ -21,7 +18,7 @@ from modules.named_entity import NamedEntityExtractor
 
 def setup_logging():
     """Configure comprehensive logging."""
-    log_dir = os.path.join(os.path.dirname(__file__), '..', 'logs')
+    log_dir = os.path.join(os.path.dirname(__file__), 'logs')
     os.makedirs(log_dir, exist_ok=True)
     
     log_filename = os.path.join(log_dir, f"yogonet_scraper_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
@@ -38,24 +35,19 @@ def setup_logging():
     return log_filename
 
 def main():
-    """
-    Main execution function for the Yogonet International Web Scraper.
-    
-    Workflow:
-    1. Scrape articles
-    2. Post-process articles
-    3. Extract named entities
-    4. Write to BigQuery
-    """
+    """Main execution function."""
     # Set up logging
     log_file = setup_logging()
     logger = logging.getLogger(__name__)
+    
+    scraper = None
     
     try:
         logger.info("🚀 Starting Yogonet International Web Scraper")
         logger.info("=" * 50)
         
         # Initialize components
+        logger.info("Initializing scrapers and processors...")
         scraper = YogonetScraper()
         post_processor = ArticlePostProcessor()
         entity_extractor = NamedEntityExtractor()
@@ -92,12 +84,15 @@ def main():
         logger.info("\n🔤 Most Common Capitalized Words:")
         for word, count in summary_report.get('most_common_capitalized_words', {}).items():
             logger.info(f"  {word}: {count}")
-        
+            
         # Write to BigQuery (conditional based on environment)
         if os.environ.get('WRITE_TO_BIGQUERY', 'true').lower() == 'true':
             logger.info("💾 Writing articles to BigQuery...")
-            bq_writer.write_articles(articles_with_entities)
-            logger.info("✅ Articles successfully written to BigQuery")
+            result = bq_writer.write_articles(articles_with_entities)
+            if result is not None:
+                logger.info("✅ Articles successfully written to BigQuery")
+            else:
+                logger.warning("⚠️ Failed to write articles to BigQuery")
         else:
             logger.info("⏩ Skipping BigQuery write (WRITE_TO_BIGQUERY is not 'true')")
         
@@ -111,10 +106,11 @@ def main():
         return None, None
     
     finally:
-        try:
-            scraper.close()
-        except Exception as cleanup_error:
-            logger.error(f"Error during cleanup: {cleanup_error}")
+        if scraper:
+            try:
+                scraper.close()
+            except Exception as cleanup_error:
+                logger.error(f"Error during cleanup: {cleanup_error}")
         
         logger.info("🔚 Scraper process completed.")
 

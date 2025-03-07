@@ -85,6 +85,16 @@ OPENAI_API_KEY: "${OPENAI_API_KEY}"
 WRITE_TO_BIGQUERY: "${WRITE_TO_BIGQUERY}"
 EOF
 
+# Create bigquery table with the dataset name
+if [ "${WRITE_TO_BIGQUERY}" = "true" ]; then
+    if ! bq ls --dataset_id "${PROJECT_ID}:${DATASET}" >/dev/null 2>&1; then
+      echo "Creating BigQuery table..."
+      bq mk --dataset "${PROJECT_ID}:${DATASET}"
+      bq mk --table "${PROJECT_ID}:${DATASET}.yogonet_articles" \
+        title:STRING,kicker:STRING,link:STRING,image:STRING,date:STRING,scrape_timestamp:TIMESTAMP,title_word_count:INTEGER,title_char_count:INTEGER,capitalized_words:STRING,persons:STRING,organizations:STRING,locations:STRING
+    fi
+
+fi
 # Deploy to Cloud Run
 echo "Deploying to Cloud Run..."
 gcloud run deploy "${SERVICE_NAME}" \
@@ -94,7 +104,7 @@ gcloud run deploy "${SERVICE_NAME}" \
     --allow-unauthenticated \
     --memory 2Gi \
     --timeout 30m \
-    --set-env-vars-file=.env.yaml \
+    --env-vars-file=.env.yaml \
     --service-account="${SERVICE_ACCOUNT}"
 
 # Clean up temporary file

@@ -1,4 +1,4 @@
-selenium==4.1.0
+selenium==4.9.0
 webdriver-manager==3.8.5
 beautifulsoup4==4.11.1
 requests==2.28.1
@@ -9,3 +9,4 @@ pandas-gbq==0.28.0
 chromedriver-binary==136.0.7051.0.0
 spacy==3.7.4
 https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
+google-cloud-bigquery[bqstorage,pandas]
