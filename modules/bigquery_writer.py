@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
-Module for writing scraped data to BigQuery using direct BigQuery client.
+Module for writing scraped data to BigQuery via local JSON file.
 """
 import os
+import json
 import logging
+import tempfile
 import pandas as pd
 from datetime import datetime
 from typing import List, Dict, Optional
 from google.cloud import bigquery
 
 class BigQueryWriter:
-    """Class for writing data to BigQuery using the BigQuery client library."""
+    """Class for writing data to BigQuery using local file approach."""
     
     def __init__(self):
         """Initialize the BigQuery writer."""
@@ -19,20 +21,12 @@ class BigQueryWriter:
         
         if not self.project_id:
             logging.warning("PROJECT_ID environment variable not set. Using default project.")
-        
-        try:
-            # Initialize BigQuery client
-            self.client = bigquery.Client()
-            logging.info(f"BigQuery client initialized for project: {self.project_id}")
-        except Exception as e:
-            logging.error(f"Failed to initialize BigQuery client: {e}")
-            self.client = None
     
     def write_articles(self, 
                        articles: List[Dict], 
                        table_name: str = 'articles') -> Optional[pd.DataFrame]:
         """
-        Write articles to BigQuery table with comprehensive metrics and entities.
+        Write articles to BigQuery table using local file approach.
         
         :param articles: List of article dictionaries
         :param table_name: Name of the BigQuery table
@@ -42,16 +36,12 @@ class BigQueryWriter:
             logging.warning("No articles to write to BigQuery.")
             return None
         
-        if not self.client:
-            logging.error("BigQuery client not initialized. Cannot write to BigQuery.")
-            return None
-        
         try:
-            # Convert articles to DataFrame
+            # Convert articles to DataFrame for processing
             df = pd.DataFrame(articles)
             
             # Add timestamp column
-            df['scrape_timestamp'] = datetime.now()
+            df['scrape_timestamp'] = datetime.now().isoformat()
             
             # Post-processing metrics
             df['title_word_count'] = df['title'].apply(self._count_words)
@@ -66,59 +56,96 @@ class BigQueryWriter:
                 if col not in df.columns:
                     df[col] = [[] for _ in range(len(df))]
             
-            # Convert entity lists to comma-separated strings for BigQuery
+            # Convert entity lists to comma-separated strings
             for col in entity_columns:
                 df[col] = df[col].apply(lambda x: ','.join(x) if isinstance(x, list) else str(x))
             
-            # Define schema for BigQuery
-            schema = [
-                bigquery.SchemaField("title", "STRING"),
-                bigquery.SchemaField("kicker", "STRING"),
-                bigquery.SchemaField("link", "STRING"),
-                bigquery.SchemaField("image", "STRING"),
-                bigquery.SchemaField("date", "STRING"),
-                bigquery.SchemaField("scrape_timestamp", "TIMESTAMP"),
-                bigquery.SchemaField("title_word_count", "INTEGER"),
-                bigquery.SchemaField("title_char_count", "INTEGER"),
-                bigquery.SchemaField("capitalized_words", "STRING"),
-                bigquery.SchemaField("persons", "STRING"),
-                bigquery.SchemaField("organizations", "STRING"),
-                bigquery.SchemaField("locations", "STRING")
-            ]
+            # Convert the DataFrame back to a list of dictionaries
+            processed_articles = df.to_dict(orient='records')
             
-            # Full table name
+            # Write to temporary JSONL file
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.jsonl') as f:
+                for article in processed_articles:
+                    # Convert any non-serializable objects to strings
+                    article_serializable = {k: str(v) if not isinstance(v, (str, int, float, bool, type(None))) else v 
+                                         for k, v in article.items()}
+                    json.dump(article_serializable, f)
+                    f.write('\n')  # Add newline for JSONL format
+                
+                temp_file_path = f.name
+            
+            logging.info(f"Wrote {len(processed_articles)} articles to temp file: {temp_file_path}")
+            
+            # Now load the JSON file into BigQuery
+            success = self._load_json_to_bigquery(temp_file_path, table_name, df)
+            
+            # Clean up temporary file
+            try:
+                os.unlink(temp_file_path)
+                logging.info(f"Deleted temporary file: {temp_file_path}")
+            except Exception as e:
+                logging.warning(f"Failed to delete temporary file: {e}")
+            
+            return df if success else None
+            
+        except Exception as e:
+            logging.error(f"Error preparing data for BigQuery: {e}", exc_info=True)
+            return None
+    
+    def _load_json_to_bigquery(self, json_file_path, table_name, df):
+        """Load JSON file into BigQuery."""
+        try:
+            # Initialize BigQuery client
+            logging.info("Initializing BigQuery client...")
+            client = bigquery.Client()
+            
+            # Define table reference
             full_table_id = f"{self.project_id}.{self.dataset}.{table_name}"
+            logging.info(f"Target table: {full_table_id}")
             
-            logging.info(f"Writing {len(df)} articles to BigQuery table {full_table_id}")
+            # Check if dataset exists, create if not
+            try:
+                client.get_dataset(f"{self.project_id}.{self.dataset}")
+                logging.info(f"Dataset {self.dataset} exists")
+            except Exception as e:
+                logging.info(f"Dataset {self.dataset} not found, creating... Error: {e}")
+                dataset = bigquery.Dataset(f"{self.project_id}.{self.dataset}")
+                dataset.location = "US"
+                client.create_dataset(dataset)
+                logging.info(f"Dataset {self.dataset} created")
             
             # Configure job
             job_config = bigquery.LoadJobConfig(
-                schema=schema,
+                source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+                autodetect=True,  # Let BigQuery detect the schema
                 write_disposition=bigquery.WriteDisposition.WRITE_APPEND
             )
             
-            # Write to BigQuery using direct client load
-            try:
-                job = self.client.load_table_from_dataframe(
-                    df, full_table_id, job_config=job_config
+            logging.info(f"Loading data from {json_file_path} to {full_table_id}...")
+            
+            # Load data from file
+            with open(json_file_path, "rb") as source_file:
+                job = client.load_table_from_file(
+                    source_file,
+                    full_table_id,
+                    job_config=job_config
                 )
-                
-                # Wait for the job to complete
-                job.result()
-                
-                logging.info(f"Successfully wrote {len(df)} articles to {full_table_id}")
-                
-                # Log summary
-                self._log_article_summary(df)
-                
-                return df
-            except Exception as job_error:
-                logging.error(f"BigQuery load job failed: {job_error}")
-                return None
-        
+            
+            # Wait for the job to complete
+            job.result()
+            
+            logging.info(f"Loaded {job.output_rows} rows into {full_table_id}")
+            
+            # Log summary
+            self._log_article_summary(df)
+            
+            return True
+            
         except Exception as e:
-            logging.error(f"Error writing to BigQuery: {e}")
-            return None
+            logging.error(f"Error loading JSON to BigQuery: {e}", exc_info=True)
+            import traceback
+            logging.error(traceback.format_exc())
+            return False
     
     def _count_words(self, text: str) -> int:
         """Count words in text."""

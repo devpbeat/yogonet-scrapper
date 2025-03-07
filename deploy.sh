@@ -103,6 +103,7 @@ gcloud run deploy "${SERVICE_NAME}" \
     --region "${REGION}" \
     --allow-unauthenticated \
     --memory 2Gi \
+    --cpu 1 \
     --timeout 30m \
     --env-vars-file=.env.yaml \
     --service-account="${SERVICE_ACCOUNT}"
