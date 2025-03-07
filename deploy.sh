@@ -80,7 +80,7 @@ echo "Creating deployment environment file..."
 cat > .env.yaml << EOF
 DATASET: "${DATASET}"
 PROJECT_ID: "${PROJECT_ID}"
-GOOGLE_APPLICATION_CREDENTIALS: "/app/google-application-credentials"
+GOOGLE_APPLICATION_CREDENTIALS: "${GOOGLE_APPLICATION_CREDENTIALS}"
 OPENAI_API_KEY: "${OPENAI_API_KEY}"
 WRITE_TO_BIGQUERY: "${WRITE_TO_BIGQUERY}"
 EOF

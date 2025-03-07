@@ -11,6 +11,8 @@ from datetime import datetime
 from typing import List, Dict, Optional
 from google.cloud import bigquery
 
+logger = logging.getLogger(__name__)
+
 class BigQueryWriter:
     """Class for writing data to BigQuery using local file approach."""
     
